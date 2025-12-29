@@ -15,6 +15,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import uy.kohesive.injekt.injectLazy
@@ -103,7 +104,7 @@ class Nagordola : AnimeHttpSource() {
             return AnimesPage(animeList, false)
         } else {
             val res = json.decodeFromString<AListResponse<AListListResponse>>(body)
-            val currentPath = json.decodeFromString<AListPathPayload>(response.request.bodyString()).path
+            val currentPath = json.decodeFromString<AListPathPayload>(response.request.body.bodyString()).path
             val animeList = res.data?.content?.filter { it.is_dir }?.map {
                 SAnime.create().apply {
                     title = it.name
@@ -116,7 +117,7 @@ class Nagordola : AnimeHttpSource() {
         }
     }
 
-    private fun okhttp3.RequestBody?.bodyString(): String {
+    private fun RequestBody?.bodyString(): String {
         val buffer = okio.Buffer()
         this?.writeTo(buffer)
         return buffer.readUtf8()
@@ -129,7 +130,7 @@ class Nagordola : AnimeHttpSource() {
 
     override suspend fun getAnimeDetails(anime: SAnime): SAnime = anime
 
-    override fun animeDetailsParse(response: Response): SAnime = throw Exception("Not used")
+    override fun animeDetailsParse(response: Response): SAnime = throw UnsupportedOperationException()
 
     // ============================== Episodes ==============================
 
@@ -167,6 +168,8 @@ class Nagordola : AnimeHttpSource() {
         }
     }
 
+    override fun episodeListParse(response: Response): List<SEpisode> = throw UnsupportedOperationException()
+
     private val fileNameRegex = Regex("""(?i)s\d+e(\d+)""", RegexOption.IGNORE_CASE)
 
     private fun isVideoFile(fileName: String): Boolean {
@@ -177,14 +180,15 @@ class Nagordola : AnimeHttpSource() {
 
     // ============================ Video Links =============================
 
-    override suspend fun getVideoList(episode: SEpisode): List<Video> {
+    override fun videoListRequest(episode: SEpisode): Request {
         val payload = buildJsonObject {
             put("path", episode.url)
         }
-        val request = POST("$baseUrl/api/fs/get", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
-        val response = client.newCall(request).awaitSuccess()
-        val res = json.decodeFromString<AListResponse<AListGetFile>>(response.body?.string().orEmpty())
+        return POST("$baseUrl/api/fs/get", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+    }
 
+    override fun videoListParse(response: Response): List<Video> {
+        val res = json.decodeFromString<AListResponse<AListGetFile>>(response.body?.string().orEmpty())
         val videoUrl = res.data?.raw_url ?: return emptyList()
         return listOf(Video(videoUrl, "Direct", videoUrl))
     }
