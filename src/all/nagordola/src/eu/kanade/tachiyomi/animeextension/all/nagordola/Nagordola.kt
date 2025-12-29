@@ -100,7 +100,6 @@ class Nagordola : AnimeHttpSource() {
                 SAnime.create().apply {
                     title = it.name
                     url = "${it.parent}/${it.name}".replace("//", "/")
-                    thumbnail_url = "$baseUrl/d${url.replace(" ", "%20")}/a11.jpg"
                 }
             } ?: emptyList()
             return AnimesPage(animeList, false)
@@ -111,8 +110,6 @@ class Nagordola : AnimeHttpSource() {
                 SAnime.create().apply {
                     title = it.name
                     url = "$currentPath/${it.name}".replace("//", "/")
-                    thumbnail_url = it.thumb.takeIf { t -> t.isNotEmpty() }
-                        ?: "$baseUrl/d${url.replace(" ", "%20")}/a11.jpg"
                 }
             } ?: emptyList()
             return AnimesPage(animeList, (res.data?.total ?: 0) > pageLimit * 30) // Simplified pagination check
