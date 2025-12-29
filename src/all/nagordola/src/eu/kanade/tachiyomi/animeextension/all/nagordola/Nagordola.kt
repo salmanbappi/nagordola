@@ -34,9 +34,16 @@ class Nagordola : AnimeHttpSource() {
 
     private val json: Json by injectLazy()
 
-    override fun headersBuilder() = super.headersBuilder()
-        .add("Referer", "$baseUrl/")
-        .add("Accept", "application/json, text/plain, */*")
+    override val client: OkHttpClient = network.client.newBuilder()
+        .addInterceptor { chain ->
+            val request = chain.request()
+            val newRequest = request.newBuilder()
+                .header("Referer", "$baseUrl/")
+                .header("Accept", "application/json, text/plain, */*")
+                .build()
+            chain.proceed(newRequest)
+        }
+        .build()
 
     // ============================== Popular ===============================
 
@@ -57,7 +64,8 @@ class Nagordola : AnimeHttpSource() {
             put("order_by", "modified")
             put("reverse", true)
         }
-        return POST("$baseUrl/api/fs/list", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+        val url = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/list").build()
+        return POST(url.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
     }
 
     override fun latestUpdatesParse(response: Response): AnimesPage = searchAnimeParse(response)
@@ -66,22 +74,25 @@ class Nagordola : AnimeHttpSource() {
 
     override suspend fun getSearchAnime(page: Int, query: String, filters: AnimeFilterList): AnimesPage {
         if (query.isNotEmpty()) {
-            val payload = buildJsonObject {
-                put("parent", "/")
-                put("keywords", query)
-                put("scope", 0)
-                put("page", page)
-                put("per_page", 30)
-            }
-            val request = POST("$baseUrl/api/fs/search", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
-            return client.newCall(request).awaitSuccess().use(::searchAnimeParse)
+            return runCatching {
+                val payload = buildJsonObject {
+                    put("parent", "/")
+                    put("keywords", query)
+                    put("scope", 0)
+                    put("page", page)
+                    put("per_page", 30)
+                }
+                val url = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/search").build()
+                val request = POST(url.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+                client.newCall(request).awaitSuccess().use(::searchAnimeParse)
+            }.getOrElse { AnimesPage(emptyList(), false) }
         }
         return super.getSearchAnime(page, query, filters)
     }
 
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
         val filterPath = filters.filterIsInstance<CategoryFilter>().firstOrNull()?.let {
-            categories[it.state].path
+            categories.getOrNull(it.state)?.path
         } ?: "/movies/movies-english"
 
         val payload = buildJsonObject {
@@ -89,37 +100,45 @@ class Nagordola : AnimeHttpSource() {
             put("page", page)
             put("per_page", 30)
         }
-        return POST("$baseUrl/api/fs/list", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+        val url = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/list").build()
+        return POST(url.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
     }
 
     override fun searchAnimeParse(response: Response): AnimesPage {
-        val body = response.body?.string().orEmpty()
-        if (response.request.url.encodedPath.endsWith("search")) {
-            val res = json.decodeFromString<AListResponse<AListSearchResponse>>(body)
-            val animeList = res.data?.content?.filter { it.is_dir }?.map {
-                SAnime.create().apply {
-                    title = it.name
-                    url = "${it.parent}/${it.name}".replace("//", "/")
-                }
-            } ?: emptyList()
-            return AnimesPage(animeList, false)
-        } else {
-            val res = json.decodeFromString<AListResponse<AListListResponse>>(body)
-            val currentPath = json.decodeFromString<AListPathPayload>(response.request.body.bodyString()).path
-            val animeList = res.data?.content?.filter { it.is_dir }?.map {
-                SAnime.create().apply {
-                    title = it.name
-                    url = "$currentPath/${it.name}".replace("//", "/")
-                }
-            } ?: emptyList()
-            return AnimesPage(animeList, (res.data?.total ?: 0) > pageLimit * 30) // Simplified pagination check
-        }
+        return runCatching {
+            val body = response.body?.string().orEmpty()
+            if (response.request.url.encodedPath.endsWith("search")) {
+                val res = json.decodeFromString<AListResponse<AListSearchResponse>>(body)
+                val animeList = res.data?.content?.filter { it.is_dir }?.map {
+                    SAnime.create().apply {
+                        title = it.name
+                        url = "${it.parent}/${it.name}".replace("//", "/")
+                    }
+                } ?: emptyList()
+                AnimesPage(animeList, false)
+            } else {
+                val res = json.decodeFromString<AListResponse<AListListResponse>>(body)
+                val currentPath = runCatching {
+                    json.decodeFromString<AListPathPayload>(response.request.body.bodyString()).path
+                }.getOrDefault("/")
+                
+                val animeList = res.data?.content?.filter { it.is_dir }?.map {
+                    SAnime.create().apply {
+                        title = it.name
+                        url = "$currentPath/${it.name}".replace("//", "/")
+                    }
+                } ?: emptyList()
+                AnimesPage(animeList, (res.data?.total ?: 0) > pageLimit * 30)
+            }
+        }.getOrElse { AnimesPage(emptyList(), false) }
     }
 
     private fun RequestBody?.bodyString(): String {
-        val buffer = okio.Buffer()
-        this?.writeTo(buffer)
-        return buffer.readUtf8()
+        return runCatching {
+            val buffer = okio.Buffer()
+            this?.writeTo(buffer)
+            buffer.readUtf8()
+        }.getOrDefault("")
     }
 
     @Serializable
@@ -133,36 +152,45 @@ class Nagordola : AnimeHttpSource() {
 
     // ============================== Episodes ==============================
 
+    private val directoryCache = mutableMapOf<String, List<SEpisode>>()
+
     override suspend fun getEpisodeList(anime: SAnime): List<SEpisode> {
+        directoryCache[anime.url]?.let { return it }
+        
         val episodes = mutableListOf<SEpisode>()
-        parseDirectory(anime.url, episodes, 0)
-        return episodes.sortedBy { it.name }.reversed()
+        runCatching {
+            parseDirectory(anime.url, episodes, 0)
+        }
+        return episodes.sortedBy { it.name }.reversed().also {
+            if (it.isNotEmpty()) directoryCache[anime.url] = it
+        }
     }
 
     private suspend fun parseDirectory(path: String, episodes: MutableList<SEpisode>, depth: Int) {
-        if (depth > 3) return // Depth limit to prevent infinite loops
+        if (depth > 3) return
 
         val payload = buildJsonObject {
             put("path", path)
         }
-        val request = POST("$baseUrl/api/fs/list", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
-        val response = client.newCall(request).awaitSuccess()
-        val res = json.decodeFromString<AListResponse<AListListResponse>>(response.body?.string().orEmpty())
+        val url = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/list").build()
+        val request = POST(url.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+        
+        runCatching {
+            val response = client.newCall(request).awaitSuccess()
+            val res = json.decodeFromString<AListResponse<AListListResponse>>(response.body?.string().orEmpty())
 
-        res.data?.content?.forEach { file ->
-            if (file.is_dir) {
-                parseDirectory("$path/${file.name}", episodes, depth + 1)
-            } else if (isVideoFile(file.name)) {
-                episodes.add(
-                    SEpisode.create().apply {
-                        name = file.name
-                        url = "$path/${file.name}".replace("//", "/")
-                        val epNum = fileNameRegex.find(file.name)?.groupValues?.get(1)?.toFloatOrNull()
-                        if (epNum != null) {
-                            episode_number = epNum
-                        }
-                    },
-                )
+            res.data?.content?.forEach { file ->
+                if (file.is_dir) {
+                    parseDirectory("$path/${file.name}", episodes, depth + 1)
+                } else if (isVideoFile(file.name)) {
+                    episodes.add(
+                        SEpisode.create().apply {
+                            name = file.name
+                            url = "$path/${file.name}".replace("//", "/")
+                            episode_number = fileNameRegex.find(file.name)?.groupValues?.get(1)?.toFloatOrNull() ?: -1f
+                        },
+                    )
+                }
             }
         }
     }
@@ -172,9 +200,8 @@ class Nagordola : AnimeHttpSource() {
     private val fileNameRegex = Regex("""(?i)s\d+e(\d+)""", RegexOption.IGNORE_CASE)
 
     private fun isVideoFile(fileName: String): Boolean {
-        return fileName.lowercase().let {
-            it.endsWith(".mp4") || it.endsWith(".mkv") || it.endsWith(".avi") || it.endsWith(".webm")
-        }
+        val lower = fileName.lowercase()
+        return VIDEO_EXTENSIONS.any { lower.endsWith(it) }
     }
 
     // ============================ Video Links =============================
@@ -183,14 +210,56 @@ class Nagordola : AnimeHttpSource() {
         val payload = buildJsonObject {
             put("path", episode.url)
         }
-        return POST("$baseUrl/api/fs/get", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+        val url = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/get").build()
+        return POST(url.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
     }
 
     override fun videoListParse(response: Response): List<Video> {
-        val res = json.decodeFromString<AListResponse<AListGetFile>>(response.body?.string().orEmpty())
-        val videoUrl = res.data?.raw_url ?: return emptyList()
-        return listOf(Video(videoUrl, "Direct", videoUrl))
+        return runCatching {
+            val res = json.decodeFromString<AListResponse<AListGetFile>>(response.body?.string().orEmpty())
+            res.data?.raw_url?.let { listOf(Video(it, "Direct", it)) } ?: emptyList()
+        }.getOrDefault(emptyList())
     }
+
+    // ============================== Filters ===============================
+
+    override fun getFilterList(): AnimeFilterList = AnimeFilterList(
+        CategoryFilter(categories.map { it.name }.toTypedArray()),
+    )
+
+    private class CategoryFilter(categories: Array<String>) : AnimeFilter.Select<String>("Category", categories)
+
+    private data class Category(val name: String, val path: String)
+
+    private val categories = listOf(
+        Category("Movies: English", "/movies/movies-english"),
+        Category("Movies: Hindi", "/movies/movies-hindi"),
+        Category("Movies: Hindi Dubbed", "/movies/movies-hindi-dubbed"),
+        Category("Movies: Animation", "/movies/animations-english"),
+        Category("Movies: Asian", "/movies/movies-asian"),
+        Category("Movies: Bangla", "/movies/movies-bangla"),
+        Category("Movies: Foreign", "/movies/movies-foreign"),
+        Category("Movies: Korean", "/movies/movies-korean"),
+        Category("Movies: Malayalam", "/movies/movies-malayalam"),
+        Category("Movies: Tamil", "/movies/movies-tamil"),
+        Category("Movies: Telugu", "/movies/movies-telugu"),
+        Category("TV Shows: English", "/tv-series/tvshows-english"),
+        Category("TV Shows: Hindi", "/tv-series/tvshows-hindi"),
+        Category("TV Shows: Hindi Dubbed", "/tv-series/tvshows-hindi-dubbed"),
+        Category("TV Shows: Bangla", "/tv-series/tvshows-bangla"),
+        Category("TV Shows: Korean", "/tv-series/tvshows-korean"),
+        Category("TV Shows: Foreign", "/tv-series/tvshows-foreign"),
+        Category("Anime: TV Shows", "/anime/tvshows-anime"),
+        Category("Anime: Movies", "/anime/movies-anime"),
+    )
+
+    companion object {
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        private const val pageLimit = 1
+        private val VIDEO_EXTENSIONS = listOf(".mp4", ".mkv", ".avi", ".webm")
+    }
+}
+
 
     // ============================== Filters ===============================
 
