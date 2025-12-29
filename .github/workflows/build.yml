@@ -41,6 +41,10 @@ jobs:
 
       - name: Build with Gradle
         id: build
+        env:
+          KEY_STORE_PASSWORD: dhakaflix123
+          ALIAS: dhakaflix
+          KEY_PASSWORD: dhakaflix123
         run: chmod +x gradlew && ./gradlew :src:all:nagordola:assembleRelease --no-daemon
 
       - name: Gemini Auto-Remediation (Failure Cleanup)
@@ -50,16 +54,11 @@ jobs:
           git reset --hard HEAD
           echo "🧹 All local changes reverted. No junk left."
 
-      - name: Sign APK
+      - name: Prepare Signed APK Path
         if: success()
-        id: sign_app
         run: |
           APK_PATH=$(find src/all/nagordola/build/outputs/apk/release -name "*.apk" | head -n 1)
-          
-          # Sign using apksigner and the local keystore
-          SIGNER=$(find $ANDROID_SDK_ROOT/build-tools -name apksigner | sort -r | head -n 1)
-          "$SIGNER" sign --ks keystore.jks --ks-pass "pass:dhakaflix123" --key-pass "pass:dhakaflix123" --out nagordola-v${{ env.NEW_VERSION }}.apk "$APK_PATH"
-          
+          cp "$APK_PATH" nagordola-v${{ env.NEW_VERSION }}.apk
           echo "SIGNED_APK=nagordola-v${{ env.NEW_VERSION }}.apk" >> $GITHUB_ENV
 
       - name: Upload APK Artifact

@@ -1,7 +1,8 @@
 /**
  * Add or remove modules to load as needed for local development here.
  */
-loadAllIndividualExtensions()
+loadIndividualExtension("all", "nagordola")
+// loadAllIndividualExtensions()
 // loadIndividualExtension("all", "jellyfin")
 
 /**
