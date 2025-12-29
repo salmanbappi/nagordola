@@ -123,7 +123,7 @@ class Nagordola : AnimeHttpSource() {
                 val currentPath = runCatching {
                     json.decodeFromString<AListPathPayload>(response.request.body.bodyString()).path
                 }.getOrDefault("/")
-                
+
                 val animeList = res.data?.content?.filter { it.is_dir }?.map {
                     SAnime.create().apply {
                         title = it.name
@@ -158,7 +158,7 @@ class Nagordola : AnimeHttpSource() {
 
     override suspend fun getEpisodeList(anime: SAnime): List<SEpisode> {
         directoryCache[anime.url]?.let { return it }
-        
+
         val episodes = mutableListOf<SEpisode>()
         runCatching {
             parseDirectory(anime.url, episodes, 0)
@@ -176,7 +176,7 @@ class Nagordola : AnimeHttpSource() {
         }
         val url = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/list").build()
         val request = POST(url.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
-        
+
         runCatching {
             val response = client.newCall(request).awaitSuccess()
             val res = json.decodeFromString<AListResponse<AListListResponse>>(response.body?.string().orEmpty())
