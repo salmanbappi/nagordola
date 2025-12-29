@@ -14,7 +14,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -257,45 +259,6 @@ class Nagordola : AnimeHttpSource() {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private const val pageLimit = 1
         private val VIDEO_EXTENSIONS = listOf(".mp4", ".mkv", ".avi", ".webm")
-    }
-}
-
-
-    // ============================== Filters ===============================
-
-    override fun getFilterList(): AnimeFilterList = AnimeFilterList(
-        CategoryFilter(categories.map { it.name }.toTypedArray()),
-    )
-
-    private class CategoryFilter(categories: Array<String>) : AnimeFilter.Select<String>("Category", categories)
-
-    private data class Category(val name: String, val path: String)
-
-    private val categories = listOf(
-        Category("Movies: English", "/movies/movies-english"),
-        Category("Movies: Hindi", "/movies/movies-hindi"),
-        Category("Movies: Hindi Dubbed", "/movies/movies-hindi-dubbed"),
-        Category("Movies: Animation", "/movies/animations-english"),
-        Category("Movies: Asian", "/movies/movies-asian"),
-        Category("Movies: Bangla", "/movies/movies-bangla"),
-        Category("Movies: Foreign", "/movies/movies-foreign"),
-        Category("Movies: Korean", "/movies/movies-korean"),
-        Category("Movies: Malayalam", "/movies/movies-malayalam"),
-        Category("Movies: Tamil", "/movies/movies-tamil"),
-        Category("Movies: Telugu", "/movies/movies-telugu"),
-        Category("TV Shows: English", "/tv-series/tvshows-english"),
-        Category("TV Shows: Hindi", "/tv-series/tvshows-hindi"),
-        Category("TV Shows: Hindi Dubbed", "/tv-series/tvshows-hindi-dubbed"),
-        Category("TV Shows: Bangla", "/tv-series/tvshows-bangla"),
-        Category("TV Shows: Korean", "/tv-series/tvshows-korean"),
-        Category("TV Shows: Foreign", "/tv-series/tvshows-foreign"),
-        Category("Anime: TV Shows", "/anime/tvshows-anime"),
-        Category("Anime: Movies", "/anime/movies-anime"),
-    )
-
-    companion object {
-        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
-        private const val pageLimit = 1 // Simplified
     }
 }
 
