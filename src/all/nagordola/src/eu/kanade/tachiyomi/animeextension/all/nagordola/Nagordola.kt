@@ -1,0 +1,240 @@
+package eu.kanade.tachiyomi.animeextension.all.nagordola
+
+import eu.kanade.tachiyomi.animesource.model.AnimeFilter
+import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
+import eu.kanade.tachiyomi.animesource.model.AnimesPage
+import eu.kanade.tachiyomi.animesource.model.SAnime
+import eu.kanade.tachiyomi.animesource.model.SEpisode
+import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
+import eu.kanade.tachiyomi.network.POST
+import eu.kanade.tachiyomi.network.awaitSuccess
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import uy.kohesive.injekt.injectLazy
+
+class Nagordola : AnimeHttpSource() {
+
+    override val name = "Nagordola"
+
+    override val baseUrl = "https://cdn.nagordola.com.bd"
+
+    override val lang = "all"
+
+    override val supportsLatest = true
+
+    private val json: Json by injectLazy()
+
+    override fun headersBuilder() = super.headersBuilder()
+        .add("Referer", "$baseUrl/")
+        .add("Accept", "application/json, text/plain, */*")
+
+    // ============================== Popular ===============================
+
+    override fun popularAnimeRequest(page: Int): Request {
+        return searchAnimeRequest(page, "", getFilterList())
+    }
+
+    override fun popularAnimeParse(response: Response): AnimesPage = searchAnimeParse(response)
+
+    // =============================== Latest ===============================
+
+    override fun latestUpdatesRequest(page: Int): Request {
+        // Just use English movies for latest for now, or we could use search with empty query and sort
+        val payload = buildJsonObject {
+            put("path", "/movies/movies-english")
+            put("page", page)
+            put("per_page", 30)
+        }
+        return POST("$baseUrl/api/fs/list", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+    }
+
+    override fun latestUpdatesParse(response: Response): AnimesPage = searchAnimeParse(response)
+
+    // =============================== Search ===============================
+
+    override suspend fun getSearchAnime(page: Int, query: String, filters: AnimeFilterList): AnimesPage {
+        if (query.isNotEmpty()) {
+            val payload = buildJsonObject {
+                put("parent", "/")
+                put("keywords", query)
+                put("scope", 0)
+                put("page", page)
+                put("per_page", 30)
+            }
+            val request = POST("$baseUrl/api/fs/search", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+            return client.newCall(request).awaitSuccess().use(::searchAnimeParse)
+        }
+        return super.getSearchAnime(page, query, filters)
+    }
+
+    override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
+        val filterPath = filters.filterIsInstance<CategoryFilter>().firstOrNull()?.let {
+            categories[it.state].path
+        } ?: "/movies/movies-english"
+
+        val payload = buildJsonObject {
+            put("path", filterPath)
+            put("page", page)
+            put("per_page", 30)
+        }
+        return POST("$baseUrl/api/fs/list", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+    }
+
+    override fun searchAnimeParse(response: Response): AnimesPage {
+        val body = response.body?.string().orEmpty()
+        if (response.request.url.encodedPath.endsWith("search")) {
+            val res = json.decodeFromString<AListResponse<AListSearchResponse>>(body)
+            val animeList = res.data?.content?.filter { it.is_dir }?.map {
+                SAnime.create().apply {
+                    title = it.name
+                    url = "${it.parent}/${it.name}"
+                }
+            } ?: emptyList()
+            return AnimesPage(animeList, false)
+        } else {
+            val res = json.decodeFromString<AListResponse<AListListResponse>>(body)
+            val currentPath = json.decodeFromString<AListPathPayload>(response.request.bodyString()).path
+            val animeList = res.data?.content?.filter { it.is_dir }?.map {
+                SAnime.create().apply {
+                    title = it.name
+                    url = "$currentPath/${it.name}".replace("//", "/")
+                    thumbnail_url = it.thumb.takeIf { t -> t.isNotEmpty() }
+                }
+            } ?: emptyList()
+            return AnimesPage(animeList, (res.data?.total ?: 0) > pageLimit * 30) // Simplified pagination check
+        }
+    }
+
+    private fun okhttp3.RequestBody?.bodyString(): String {
+        val buffer = okio.Buffer()
+        this?.writeTo(buffer)
+        return buffer.readUtf8()
+    }
+
+    @Serializable
+    private data class AListPathPayload(val path: String)
+
+    // =========================== Anime Details ============================
+
+    override suspend fun getAnimeDetails(anime: SAnime): SAnime = anime
+
+    override fun animeDetailsParse(response: Response): SAnime = throw Exception("Not used")
+
+    // ============================== Episodes ==============================
+
+    override suspend fun getEpisodeList(anime: SAnime): List<SEpisode> {
+        val episodes = mutableListOf<SEpisode>()
+        parseDirectory(anime.url, episodes, 0)
+        return episodes.sortedBy { it.name }.reversed()
+    }
+
+    private suspend fun parseDirectory(path: String, episodes: MutableList<SEpisode>, depth: Int) {
+        if (depth > 3) return // Depth limit to prevent infinite loops
+
+        val payload = buildJsonObject {
+            put("path", path)
+        }
+        val request = POST("$baseUrl/api/fs/list", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+        val response = client.newCall(request).awaitSuccess()
+        val res = json.decodeFromString<AListResponse<AListListResponse>>(response.body?.string().orEmpty())
+        
+        res.data?.content?.forEach { file ->
+            if (file.is_dir) {
+                parseDirectory("$path/${file.name}", episodes, depth + 1)
+            } else if (isVideoFile(file.name)) {
+                episodes.add(SEpisode.create().apply {
+                    name = file.name
+                    url = "$path/${file.name}".replace("//", "/")
+                    val epNum = fileNameRegex.find(file.name)?.groupValues?.get(1)?.toFloatOrNull()
+                    if (epNum != null) {
+                        episode_number = epNum
+                    }
+                })
+            }
+        }
+    }
+
+    private val fileNameRegex = Regex("""(?i)s\d+e(\d+)""", RegexOption.IGNORE_CASE)
+
+    private fun isVideoFile(fileName: String): Boolean {
+        return fileName.lowercase().let {
+            it.endsWith(".mp4") || it.endsWith(".mkv") || it.endsWith(".avi") || it.endsWith(".webm")
+        }
+    }
+
+    // ============================ Video Links =============================
+
+    override suspend fun getVideoList(episode: SEpisode): List<Video> {
+        val payload = buildJsonObject {
+            put("path", episode.url)
+        }
+        val request = POST("$baseUrl/api/fs/get", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+        val response = client.newCall(request).awaitSuccess()
+        val res = json.decodeFromString<AListResponse<AListGetFile>>(response.body?.string().orEmpty())
+        
+        val videoUrl = res.data?.raw_url ?: return emptyList()
+        return listOf(Video(videoUrl, "Direct", videoUrl))
+    }
+
+    // ============================== Filters ===============================
+
+    override fun getFilterList(): AnimeFilterList = AnimeFilterList(
+        CategoryFilter(categories.map { it.name }.toTypedArray())
+    )
+
+    private class CategoryFilter(categories: Array<String>) : AnimeFilter.Select<String>("Category", categories)
+
+    private data class Category(val name: String, val path: String)
+
+    private val categories = listOf(
+        Category("Movies: English", "/movies/movies-english"),
+        Category("Movies: Hindi", "/movies/movies-hindi"),
+        Category("Movies: Hindi Dubbed", "/movies/movies-hindi-dubbed"),
+        Category("Movies: Animation", "/movies/animations-english"),
+        Category("Movies: Asian", "/movies/movies-asian"),
+        Category("Movies: Bangla", "/movies/movies-bangla"),
+        Category("Movies: Foreign", "/movies/movies-foreign"),
+        Category("Movies: Korean", "/movies/movies-korean"),
+        Category("Movies: Malayalam", "/movies/movies-malayalam"),
+        Category("Movies: Tamil", "/movies/movies-tamil"),
+        Category("Movies: Telugu", "/movies/movies-telugu"),
+        Category("TV Shows: English", "/tv-series/tvshows-english"),
+        Category("TV Shows: Hindi", "/tv-series/tvshows-hindi"),
+        Category("TV Shows: Hindi Dubbed", "/tv-series/tvshows-hindi-dubbed"),
+        Category("TV Shows: Bangla", "/tv-series/tvshows-bangla"),
+        Category("TV Shows: Korean", "/tv-series/tvshows-korean"),
+        Category("TV Shows: Foreign", "/tv-series/tvshows-foreign"),
+        Category("Anime: TV Shows", "/anime/tvshows-anime"),
+        Category("Anime: Movies", "/anime/movies-anime")
+    )
+
+    companion object {
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        private const val pageLimit = 1 // Simplified
+    }
+}
+
+@Serializable
+data class AListResponse<T>(val code: Int, val message: String, val data: T? = null)
+
+@Serializable
+data class AListFile(val name: String, val size: Long, val is_dir: Boolean, val thumb: String = "")
+
+@Serializable
+data class AListListResponse(val content: List<AListFile>? = emptyList(), val total: Int = 0)
+
+@Serializable
+data class AListSearchFile(val parent: String, val name: String, val is_dir: Boolean)
+
+@Serializable
+data class AListSearchResponse(val content: List<AListSearchFile>? = emptyList(), val total: Int = 0)
+
+@Serializable
+data class AListGetFile(val raw_url: String)
