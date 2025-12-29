@@ -43,7 +43,7 @@ jobs:
         id: build
         env:
           KEY_STORE_PASSWORD: dhakaflix123
-          ALIAS: dhakaflix
+          ALIAS: dflix
           KEY_PASSWORD: dhakaflix123
         run: chmod +x gradlew && ./gradlew :src:all:nagordola:assembleRelease --no-daemon
 
