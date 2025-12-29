@@ -69,7 +69,7 @@ jobs:
           path: ${{ env.SIGNED_APK }}
 
       - name: Create Release
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.NEW_VERSION }}
@@ -86,7 +86,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Commit Version Bump
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master'
         run: |
           git config --global user.name "Gemini Automation"
           git config --global user.email "gemini@automation.bot"
@@ -95,7 +95,7 @@ jobs:
           git push origin master
 
       - name: Push to Extensions Repo
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master'
         run: |
           REPO_DIR="extensions-repo-tmp"
           git clone https://x-access-token:${{ secrets.GH_PAT }}@github.com/salmanbappi/extensions-repo.git $REPO_DIR
