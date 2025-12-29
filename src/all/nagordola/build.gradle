@@ -1,7 +1,7 @@
 ext {
     extName = 'Nagordola'
     extClass = '.Nagordola'
-    extVersionCode = 1006
+    extVersionCode = 1007
 }
 
 apply from: "$rootDir/common.gradle"
