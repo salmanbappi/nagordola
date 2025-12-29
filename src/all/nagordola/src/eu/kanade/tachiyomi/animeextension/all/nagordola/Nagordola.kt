@@ -66,8 +66,8 @@ class Nagordola : AnimeHttpSource() {
             put("order_by", "modified")
             put("reverse", true)
         }
-        val url = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/list").build()
-        return POST(url.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+        val apiUrl = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/list").build()
+        return POST(apiUrl.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
     }
 
     override fun latestUpdatesParse(response: Response): AnimesPage = searchAnimeParse(response)
@@ -84,8 +84,8 @@ class Nagordola : AnimeHttpSource() {
                     put("page", page)
                     put("per_page", 30)
                 }
-                val url = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/search").build()
-                val request = POST(url.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+                val apiUrl = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/search").build()
+                val request = POST(apiUrl.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
                 client.newCall(request).awaitSuccess().use(::searchAnimeParse)
             }.getOrElse { AnimesPage(emptyList(), false) }
         }
@@ -102,8 +102,8 @@ class Nagordola : AnimeHttpSource() {
             put("page", page)
             put("per_page", 30)
         }
-        val url = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/list").build()
-        return POST(url.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+        val apiUrl = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/list").build()
+        return POST(apiUrl.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
     }
 
     override fun searchAnimeParse(response: Response): AnimesPage {
@@ -174,8 +174,8 @@ class Nagordola : AnimeHttpSource() {
         val payload = buildJsonObject {
             put("path", path)
         }
-        val url = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/list").build()
-        val request = POST(url.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+        val apiUrl = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/list").build()
+        val request = POST(apiUrl.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
 
         runCatching {
             val response = client.newCall(request).awaitSuccess()
@@ -212,8 +212,8 @@ class Nagordola : AnimeHttpSource() {
         val payload = buildJsonObject {
             put("path", episode.url)
         }
-        val url = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/get").build()
-        return POST(url.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+        val apiUrl = baseUrl.toHttpUrl().newBuilder().addPathSegments("api/fs/get").build()
+        return POST(apiUrl.toString(), headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
     }
 
     override fun videoListParse(response: Response): List<Video> {
