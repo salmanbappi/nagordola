@@ -108,7 +108,7 @@ class Nagordola : AnimeHttpSource() {
                 SAnime.create().apply {
                     title = it.name
                     url = "$currentPath/${it.name}".replace("//", "/")
-                    thumbnail_url = it.thumb.takeIf { t -> t.isNotEmpty() } 
+                    thumbnail_url = it.thumb.takeIf { t -> t.isNotEmpty() }
                         ?: "$baseUrl/d${url.replace(" ", "%20")}/a11.jpg"
                 }
             } ?: emptyList()
@@ -148,19 +148,21 @@ class Nagordola : AnimeHttpSource() {
         val request = POST("$baseUrl/api/fs/list", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
         val response = client.newCall(request).awaitSuccess()
         val res = json.decodeFromString<AListResponse<AListListResponse>>(response.body?.string().orEmpty())
-        
+
         res.data?.content?.forEach { file ->
             if (file.is_dir) {
                 parseDirectory("$path/${file.name}", episodes, depth + 1)
             } else if (isVideoFile(file.name)) {
-                episodes.add(SEpisode.create().apply {
-                    name = file.name
-                    url = "$path/${file.name}".replace("//", "/")
-                    val epNum = fileNameRegex.find(file.name)?.groupValues?.get(1)?.toFloatOrNull()
-                    if (epNum != null) {
-                        episode_number = epNum
-                    }
-                })
+                episodes.add(
+                    SEpisode.create().apply {
+                        name = file.name
+                        url = "$path/${file.name}".replace("//", "/")
+                        val epNum = fileNameRegex.find(file.name)?.groupValues?.get(1)?.toFloatOrNull()
+                        if (epNum != null) {
+                            episode_number = epNum
+                        }
+                    },
+                )
             }
         }
     }
@@ -182,7 +184,7 @@ class Nagordola : AnimeHttpSource() {
         val request = POST("$baseUrl/api/fs/get", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
         val response = client.newCall(request).awaitSuccess()
         val res = json.decodeFromString<AListResponse<AListGetFile>>(response.body?.string().orEmpty())
-        
+
         val videoUrl = res.data?.raw_url ?: return emptyList()
         return listOf(Video(videoUrl, "Direct", videoUrl))
     }
@@ -190,7 +192,7 @@ class Nagordola : AnimeHttpSource() {
     // ============================== Filters ===============================
 
     override fun getFilterList(): AnimeFilterList = AnimeFilterList(
-        CategoryFilter(categories.map { it.name }.toTypedArray())
+        CategoryFilter(categories.map { it.name }.toTypedArray()),
     )
 
     private class CategoryFilter(categories: Array<String>) : AnimeFilter.Select<String>("Category", categories)
@@ -216,7 +218,7 @@ class Nagordola : AnimeHttpSource() {
         Category("TV Shows: Korean", "/tv-series/tvshows-korean"),
         Category("TV Shows: Foreign", "/tv-series/tvshows-foreign"),
         Category("Anime: TV Shows", "/anime/tvshows-anime"),
-        Category("Anime: Movies", "/anime/movies-anime")
+        Category("Anime: Movies", "/anime/movies-anime"),
     )
 
     companion object {
