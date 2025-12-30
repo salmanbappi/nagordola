@@ -1,5 +1,11 @@
 package eu.kanade.tachiyomi.animeextension.all.nagordola
 
+import android.app.Application
+import android.content.SharedPreferences
+import android.util.Log
+import androidx.preference.EditTextPreference
+import androidx.preference.PreferenceScreen
+import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
@@ -22,7 +28,7 @@ import okhttp3.Response
 import uy.kohesive.injekt.injectLazy
 
 @OptIn(ExperimentalSerializationApi::class)
-class Nagordola : AnimeHttpSource() {
+class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
 
     override val name = "Nagordola"
 
@@ -33,6 +39,19 @@ class Nagordola : AnimeHttpSource() {
     override val supportsLatest = true
 
     private val json: Json by injectLazy()
+
+    private val preferences: SharedPreferences by lazy {
+        uy.kohesive.injekt.Injekt.get<Application>().getSharedPreferences("source_$id", 0)
+    }
+
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        EditTextPreference(screen.context).apply {
+            key = PREF_OMDB_API_KEY
+            title = "OMDb API Key"
+            summary = "Used for fetching high-quality posters. Get one for free at omdbapi.com"
+            setDefaultValue("")
+        }.also(screen::addPreference)
+    }
 
     override fun headersBuilder() = super.headersBuilder()
         .add("Referer", "$baseUrl/")
@@ -131,7 +150,35 @@ class Nagordola : AnimeHttpSource() {
 
     // =========================== Anime Details ============================
 
-    override suspend fun getAnimeDetails(anime: SAnime): SAnime = anime
+    override suspend fun getAnimeDetails(anime: SAnime): SAnime {
+        val apiKey = preferences.getString(PREF_OMDB_API_KEY, "") ?: ""
+        if (apiKey.isBlank()) return anime
+
+        val cacheKey = "poster_${anime.title.hashCode()}"
+        val cachedPoster = preferences.getString(cacheKey, null)
+
+        if (cachedPoster != null) {
+            anime.thumbnail_url = cachedPoster
+            return anime
+        }
+
+        try {
+            val cleanTitle = anime.title.replace(Regex("""\(?\d{4}\)?"""), "").trim()
+            val url = "https://www.omdbapi.com/?apikey=$apiKey&t=${java.net.URLEncoder.encode(cleanTitle, "UTF-8")}"
+            val response = client.newCall(eu.kanade.tachiyomi.network.GET(url)).awaitSuccess()
+            val body = response.body?.string().orEmpty()
+            val omdb = json.decodeFromString<OMDbResponse>(body)
+
+            if (omdb.Response == "True" && !omdb.Poster.isNullOrBlank() && omdb.Poster != "N/A") {
+                anime.thumbnail_url = omdb.Poster
+                preferences.edit().putString(cacheKey, omdb.Poster).apply()
+            }
+        } catch (e: Exception) {
+            Log.e("Nagordola", "OMDb lookup failed: ${e.message}")
+        }
+
+        return anime
+    }
 
     override fun animeDetailsParse(response: Response): SAnime = throw UnsupportedOperationException()
 
@@ -268,8 +315,16 @@ class Nagordola : AnimeHttpSource() {
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private const val pageLimit = 1 // Simplified
+        private const val PREF_OMDB_API_KEY = "omdb_api_key"
     }
 }
+
+@Serializable
+data class OMDbResponse(
+    val Response: String,
+    val Poster: String? = null,
+    val Error: String? = null
+)
 
 @Serializable
 data class AListResponse<T>(val code: Int, val message: String, val data: T? = null)
