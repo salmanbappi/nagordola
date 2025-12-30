@@ -135,8 +135,44 @@ class Nagordola : AnimeHttpSource() {
 
     override suspend fun getEpisodeList(anime: SAnime): List<SEpisode> {
         val episodes = mutableListOf<SEpisode>()
-        parseDirectory(anime.url, episodes, 0)
-        return episodes.sortedBy { it.name }.reversed()
+
+        // Try Search as a "Batch" / Recursive fetch first to reduce requests
+        try {
+            val payload = buildJsonObject {
+                put("parent", anime.url)
+                put("keywords", " ") // Broad keyword
+                put("scope", 2)      // Files only
+                put("per_page", 100)
+            }
+            val request = POST("$baseUrl/api/fs/search", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+            val response = client.newCall(request).awaitSuccess()
+            val res = json.decodeFromString<AListResponse<AListSearchResponse>>(response.body?.string().orEmpty())
+
+            if (res.code == 200 && res.data?.content?.isNotEmpty() == true) {
+                res.data.content.forEach { file ->
+                    if (isVideoFile(file.name)) {
+                        episodes.add(
+                            SEpisode.create().apply {
+                                name = file.name
+                                url = "${file.parent}/${file.name}".replace("//", "/")
+                                val epNum = fileNameRegex.find(file.name)?.groupValues?.get(1)?.toFloatOrNull()
+                                if (epNum != null) {
+                                    episode_number = epNum
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Search failed or disabled, fallback to manual recursion
+        }
+
+        if (episodes.isEmpty()) {
+            parseDirectory(anime.url, episodes, 0)
+        }
+
+        return episodes.distinctBy { it.url }.sortedBy { it.name }.reversed()
     }
 
     private suspend fun parseDirectory(path: String, episodes: MutableList<SEpisode>, depth: Int) {
