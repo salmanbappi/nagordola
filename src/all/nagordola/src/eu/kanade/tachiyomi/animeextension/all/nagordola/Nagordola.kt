@@ -55,7 +55,7 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
             key = PREF_OMDB_API_KEY
             title = "OMDb API Key"
             summary = "Used for fetching high-quality posters. Get one for free at omdbapi.com"
-            setDefaultValue("1bb541cf")
+            setDefaultValue("")
         }.also(screen::addPreference)
     }
 
@@ -63,7 +63,50 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
         .add("Referer", "$baseUrl/")
         .add("Accept", "application/json, text/plain, */*")
 
+    private suspend fun enrichAnimes(animes: List<SAnime>) {
+        val apiKey = preferences.getString(PREF_OMDB_API_KEY, "") ?: ""
+        if (apiKey.isBlank()) return
+
+        kotlinx.coroutines.coroutineScope {
+            animes.map { anime ->
+                kotlinx.coroutines.async {
+                    fetchPoster(anime, apiKey)
+                }
+            }.kotlinx.coroutines.awaitAll()
+        }
+    }
+
+    private suspend fun fetchPoster(anime: SAnime, apiKey: String) {
+        val cacheKey = "poster_${anime.title.hashCode()}"
+        val cachedPoster = preferences.getString(cacheKey, null)
+
+        if (cachedPoster != null) {
+            anime.thumbnail_url = cachedPoster
+            return
+        }
+
+        try {
+            val cleanTitle = anime.title.replace(Regex("""\(?\d{4}\)?"""), "").trim()
+            val url = "https://www.omdbapi.com/?apikey=$apiKey&t=${java.net.URLEncoder.encode(cleanTitle, "UTF-8")}"
+            val response = client.newCall(eu.kanade.tachiyomi.network.GET(url)).awaitSuccess()
+            val body = response.body?.string().orEmpty()
+            val omdb = omdbJson.decodeFromString<OMDbResponse>(body)
+
+            if (omdb.Response == "True" && !omdb.Poster.isNullOrBlank() && omdb.Poster != "N/A") {
+                anime.thumbnail_url = omdb.Poster
+                preferences.edit().putString(cacheKey, omdb.Poster).apply()
+            }
+        } catch (e: Exception) {
+            Log.e("Nagordola", "OMDb lookup failed: ${e.message}")
+        }
+    }
+
     // ============================== Popular ===============================
+
+    override suspend fun getPopularAnime(page: Int): AnimesPage {
+        val response = client.newCall(popularAnimeRequest(page)).awaitSuccess()
+        return popularAnimeParse(response).also { enrichAnimes(it.animes) }
+    }
 
     override fun popularAnimeRequest(page: Int): Request {
         return searchAnimeRequest(page, "", getFilterList())
@@ -72,6 +115,11 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
     override fun popularAnimeParse(response: Response): AnimesPage = searchAnimeParse(response)
 
     // =============================== Latest ===============================
+
+    override suspend fun getLatestUpdates(page: Int): AnimesPage {
+        val response = client.newCall(latestUpdatesRequest(page)).awaitSuccess()
+        return latestUpdatesParse(response).also { enrichAnimes(it.animes) }
+    }
 
     override fun latestUpdatesRequest(page: Int): Request {
         val payload = buildJsonObject {
@@ -99,9 +147,9 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
                 put("per_page", 30)
             }
             val request = POST("$baseUrl/api/fs/search", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
-            return client.newCall(request).awaitSuccess().use(::searchAnimeParse)
+            return client.newCall(request).awaitSuccess().use(::searchAnimeParse).also { enrichAnimes(it.animes) }
         }
-        return super.getSearchAnime(page, query, filters)
+        return super.getSearchAnime(page, query, filters).also { enrichAnimes(it.animes) }
     }
 
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
@@ -153,36 +201,10 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
     // =========================== Anime Details ============================
 
     override suspend fun getAnimeDetails(anime: SAnime): SAnime {
-        val apiKey = preferences.getString(PREF_OMDB_API_KEY, "1bb541cf")?.takeIf { it.isNotBlank() } ?: "1bb541cf"
-        
-        val cacheKey = "poster_${anime.title.hashCode()}"
-        val cachedPoster = preferences.getString(cacheKey, null)
-
-        if (cachedPoster != null) {
-            anime.thumbnail_url = cachedPoster
-            return anime
+        val apiKey = preferences.getString(PREF_OMDB_API_KEY, "") ?: ""
+        if (apiKey.isNotBlank()) {
+            fetchPoster(anime, apiKey)
         }
-
-        try {
-            val cleanTitle = anime.title.replace(Regex("""\(?\d{4}\)?"""), "").trim()
-            val url = "https://www.omdbapi.com/?apikey=$apiKey&t=${java.net.URLEncoder.encode(cleanTitle, "UTF-8")}"
-            Log.d("Nagordola", "Fetching OMDb: $url")
-            val response = client.newCall(eu.kanade.tachiyomi.network.GET(url)).awaitSuccess()
-            val body = response.body?.string().orEmpty()
-            Log.d("Nagordola", "OMDb Response: $body")
-            val omdb = omdbJson.decodeFromString<OMDbResponse>(body)
-
-            if (omdb.Response == "True" && !omdb.Poster.isNullOrBlank() && omdb.Poster != "N/A") {
-                anime.thumbnail_url = omdb.Poster
-                preferences.edit().putString(cacheKey, omdb.Poster).apply()
-                Log.d("Nagordola", "Successfully updated poster: ${omdb.Poster}")
-            } else {
-                Log.w("Nagordola", "OMDb Poster not found: ${omdb.Error}")
-            }
-        } catch (e: Exception) {
-            Log.e("Nagordola", "OMDb lookup failed: ${e.message}")
-        }
-
         return anime
     }
 
