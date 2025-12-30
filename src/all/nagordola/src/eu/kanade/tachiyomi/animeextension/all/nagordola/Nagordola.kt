@@ -50,7 +50,7 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
             key = PREF_OMDB_API_KEY
             title = "OMDb API Key"
             summary = "Used for fetching high-quality posters. Get one for free at omdbapi.com"
-            setDefaultValue("")
+            setDefaultValue("1bb541cf")
         }.also(screen::addPreference)
     }
 
@@ -148,9 +148,8 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
     // =========================== Anime Details ============================
 
     override suspend fun getAnimeDetails(anime: SAnime): SAnime {
-        val apiKey = preferences.getString(PREF_OMDB_API_KEY, "") ?: ""
-        if (apiKey.isBlank()) return anime
-
+        val apiKey = preferences.getString(PREF_OMDB_API_KEY, "1bb541cf")?.takeIf { it.isNotBlank() } ?: "1bb541cf"
+        
         val cacheKey = "poster_${anime.title.hashCode()}"
         val cachedPoster = preferences.getString(cacheKey, null)
 
@@ -162,13 +161,18 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
         try {
             val cleanTitle = anime.title.replace(Regex("""\(?\d{4}\)?"""), "").trim()
             val url = "https://www.omdbapi.com/?apikey=$apiKey&t=${java.net.URLEncoder.encode(cleanTitle, "UTF-8")}"
+            Log.d("Nagordola", "Fetching OMDb: $url")
             val response = client.newCall(eu.kanade.tachiyomi.network.GET(url)).awaitSuccess()
             val body = response.body?.string().orEmpty()
+            Log.d("Nagordola", "OMDb Response: $body")
             val omdb = json.decodeFromString<OMDbResponse>(body)
 
             if (omdb.Response == "True" && !omdb.Poster.isNullOrBlank() && omdb.Poster != "N/A") {
                 anime.thumbnail_url = omdb.Poster
                 preferences.edit().putString(cacheKey, omdb.Poster).apply()
+                Log.d("Nagordola", "Successfully updated poster: ${omdb.Poster}")
+            } else {
+                Log.w("Nagordola", "OMDb Poster not found: ${omdb.Error}")
             }
         } catch (e: Exception) {
             Log.e("Nagordola", "OMDb lookup failed: ${e.message}")
