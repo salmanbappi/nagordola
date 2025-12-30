@@ -60,10 +60,26 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
     }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        androidx.preference.ListPreference(screen.context).apply {
+            key = PREF_POSTER_SOURCE
+            title = "Poster Source"
+            entries = arrayOf("OMDb", "TMDb")
+            entryValues = arrayOf("omdb", "tmdb")
+            summary = "%s"
+            setDefaultValue("tmdb")
+        }.also(screen::addPreference)
+
+        EditTextPreference(screen.context).apply {
+            key = PREF_TMDB_API_KEY
+            title = "TMDb API Key"
+            summary = "Used for TMDb posters. Get one at themoviedb.org"
+            setDefaultValue("5cd49aeaf94161b1e7badb23820f6ea9")
+        }.also(screen::addPreference)
+
         EditTextPreference(screen.context).apply {
             key = PREF_OMDB_API_KEY
             title = "OMDb API Key"
-            summary = "Used for fetching high-quality posters. Get one for free at omdbapi.com"
+            summary = "Used for OMDb posters. Get one at omdbapi.com"
             setDefaultValue("")
         }.also(screen::addPreference)
     }
@@ -73,7 +89,7 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
         .add("Accept", "application/json, text/plain, */*")
 
     private suspend fun fetchPoster(anime: SAnime, apiKey: String) {
-        val cacheKey = "poster_${anime.title.hashCode()}"
+        val cacheKey = "poster_omdb_${anime.title.hashCode()}"
         val cachedPoster = preferences.getString(cacheKey, null)
 
         if (cachedPoster != null) {
@@ -94,6 +110,33 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
             }
         } catch (e: Exception) {
             Log.e("Nagordola", "OMDb lookup failed: ${e.message}")
+        }
+    }
+
+    private suspend fun fetchPosterFromTMDb(anime: SAnime, apiKey: String) {
+        val cacheKey = "poster_tmdb_${anime.title.hashCode()}"
+        val cachedPoster = preferences.getString(cacheKey, null)
+
+        if (cachedPoster != null) {
+            anime.thumbnail_url = cachedPoster
+            return
+        }
+
+        try {
+            val cleanTitle = anime.title.replace(Regex("""\(?\d{4}\)?"""), "").trim()
+            val url = "https://api.themoviedb.org/3/search/multi?api_key=$apiKey&query=${java.net.URLEncoder.encode(cleanTitle, "UTF-8")}"
+            val response = client.newCall(eu.kanade.tachiyomi.network.GET(url)).awaitSuccess()
+            val body = response.body?.string().orEmpty()
+            val tmdb = omdbJson.decodeFromString<TMDbResponse>(body)
+
+            val posterPath = tmdb.results?.firstOrNull()?.poster_path
+            if (!posterPath.isNullOrBlank()) {
+                val posterUrl = "https://image.tmdb.org/t/p/w500$posterPath"
+                anime.thumbnail_url = posterUrl
+                preferences.edit().putString(cacheKey, posterUrl).apply()
+            }
+        } catch (e: Exception) {
+            Log.e("Nagordola", "TMDb lookup failed: ${e.message}")
         }
     }
 
@@ -187,9 +230,13 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
     // =========================== Anime Details ============================
 
     override suspend fun getAnimeDetails(anime: SAnime): SAnime {
-        val apiKey = preferences.getString(PREF_OMDB_API_KEY, "") ?: ""
-        if (apiKey.isNotBlank()) {
-            fetchPoster(anime, apiKey)
+        val source = preferences.getString(PREF_POSTER_SOURCE, "tmdb")
+        if (source == "omdb") {
+            val apiKey = preferences.getString(PREF_OMDB_API_KEY, "") ?: ""
+            if (apiKey.isNotBlank()) fetchPoster(anime, apiKey)
+        } else {
+            val apiKey = preferences.getString(PREF_TMDB_API_KEY, "5cd49aeaf94161b1e7badb23820f6ea9") ?: "5cd49aeaf94161b1e7badb23820f6ea9"
+            if (apiKey.isNotBlank()) fetchPosterFromTMDb(anime, apiKey)
         }
         return anime
     }
@@ -297,6 +344,8 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private const val pageLimit = 1 // Simplified
         private const val PREF_OMDB_API_KEY = "omdb_api_key"
+        private const val PREF_TMDB_API_KEY = "tmdb_api_key"
+        private const val PREF_POSTER_SOURCE = "poster_source"
     }
 }
 
@@ -305,6 +354,16 @@ data class OMDbResponse(
     val Response: String,
     val Poster: String? = null,
     val Error: String? = null
+)
+
+@Serializable
+data class TMDbResponse(
+    val results: List<TMDbResult>? = null
+)
+
+@Serializable
+data class TMDbResult(
+    val poster_path: String? = null
 )
 
 @Serializable
