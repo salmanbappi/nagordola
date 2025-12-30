@@ -15,6 +15,9 @@ import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.awaitSuccess
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -67,12 +70,12 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
         val apiKey = preferences.getString(PREF_OMDB_API_KEY, "") ?: ""
         if (apiKey.isBlank()) return
 
-        kotlinx.coroutines.coroutineScope {
+        coroutineScope {
             animes.map { anime ->
-                kotlinx.coroutines.async {
+                async {
                     fetchPoster(anime, apiKey)
                 }
-            }.kotlinx.coroutines.awaitAll()
+            }.awaitAll()
         }
     }
 
