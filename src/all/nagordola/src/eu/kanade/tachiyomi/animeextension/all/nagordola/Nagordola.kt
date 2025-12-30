@@ -212,7 +212,22 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
                 put("per_page", 30)
             }
             val request = POST("$baseUrl/api/fs/search", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
-            return client.newCall(request).awaitSuccess().use(::searchAnimeParse).also { enrichAnimes(it.animes) }
+            val result = client.newCall(request).awaitSuccess().use(::searchAnimeParse)
+            
+            // Probing fallback for names with spaces (e.g. Ben 10 -> Ben.10)
+            if (result.animes.isEmpty() && query.contains(" ")) {
+                val probePayload = buildJsonObject {
+                    put("parent", "/")
+                    put("keywords", query.replace(" ", "."))
+                    put("scope", 0)
+                    put("page", page)
+                    put("per_page", 30)
+                }
+                val probeRequest = POST("$baseUrl/api/fs/search", headers, probePayload.toString().toRequestBody(JSON_MEDIA_TYPE))
+                return client.newCall(probeRequest).awaitSuccess().use(::searchAnimeParse).also { enrichAnimes(it.animes) }
+            }
+            
+            return result.also { enrichAnimes(it.animes) }
         }
         return super.getSearchAnime(page, query, filters).also { enrichAnimes(it.animes) }
     }
@@ -234,7 +249,7 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
         val body = response.body?.string().orEmpty()
         if (response.request.url.encodedPath.endsWith("search")) {
             val res = json.decodeFromString<AListResponse<AListSearchResponse>>(body)
-            val animeList = res.data?.content?.filter { it.is_dir }?.map {
+            val animeList = res.data?.content?.map {
                 SAnime.create().apply {
                     title = it.name
                     url = "${it.parent}/${it.name}".replace("//", "/")
