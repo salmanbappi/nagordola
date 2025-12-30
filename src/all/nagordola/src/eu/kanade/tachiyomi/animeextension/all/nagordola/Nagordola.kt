@@ -66,8 +66,12 @@ class Nagordola : AnimeHttpSource() {
 
     override suspend fun getSearchAnime(page: Int, query: String, filters: AnimeFilterList): AnimesPage {
         if (query.isNotEmpty()) {
+            val filterPath = filters.filterIsInstance<CategoryFilter>().firstOrNull()?.let {
+                categories[it.state].path
+            } ?: "/"
+
             val payload = buildJsonObject {
-                put("parent", "/")
+                put("parent", filterPath)
                 put("keywords", query)
                 put("scope", 0)
                 put("page", page)
@@ -155,10 +159,7 @@ class Nagordola : AnimeHttpSource() {
                             SEpisode.create().apply {
                                 name = file.name
                                 url = "${file.parent}/${file.name}".replace("//", "/")
-                                val epNum = fileNameRegex.find(file.name)?.groupValues?.get(1)?.toFloatOrNull()
-                                if (epNum != null) {
-                                    episode_number = epNum
-                                }
+                                episode_number = parseEpisodeNumber(file.name)
                             },
                         )
                     }
@@ -193,10 +194,7 @@ class Nagordola : AnimeHttpSource() {
                     SEpisode.create().apply {
                         name = file.name
                         url = "$path/${file.name}".replace("//", "/")
-                        val epNum = fileNameRegex.find(file.name)?.groupValues?.get(1)?.toFloatOrNull()
-                        if (epNum != null) {
-                            episode_number = epNum
-                        }
+                        episode_number = parseEpisodeNumber(file.name)
                     },
                 )
             }
@@ -205,7 +203,14 @@ class Nagordola : AnimeHttpSource() {
 
     override fun episodeListParse(response: Response): List<SEpisode> = throw UnsupportedOperationException()
 
-    private val fileNameRegex = Regex("""(?i)s\d+e(\d+)""", RegexOption.IGNORE_CASE)
+    private fun parseEpisodeNumber(name: String): Float {
+        return fileNameRegex.find(name)?.groupValues?.get(1)?.toFloatOrNull()
+            ?: fallbackNumberRegex.find(name)?.groupValues?.get(1)?.toFloatOrNull()
+            ?: -1f
+    }
+
+    private val fileNameRegex = Regex("""(?i)(?:s\d+e|e|part|ep|episode|第)\s?(\d+)""", RegexOption.IGNORE_CASE)
+    private val fallbackNumberRegex = Regex("""(\d+)""")
 
     private fun isVideoFile(fileName: String): Boolean {
         return fileName.lowercase().let {
