@@ -41,6 +41,11 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
 
     private val json: Json by injectLazy()
 
+    private val omdbJson = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+    }
+
     private val preferences: SharedPreferences by lazy {
         uy.kohesive.injekt.Injekt.get<Application>().getSharedPreferences("source_$id", 0)
     }
@@ -165,7 +170,7 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
             val response = client.newCall(eu.kanade.tachiyomi.network.GET(url)).awaitSuccess()
             val body = response.body?.string().orEmpty()
             Log.d("Nagordola", "OMDb Response: $body")
-            val omdb = json.decodeFromString<OMDbResponse>(body)
+            val omdb = omdbJson.decodeFromString<OMDbResponse>(body)
 
             if (omdb.Response == "True" && !omdb.Poster.isNullOrBlank() && omdb.Poster != "N/A") {
                 anime.thumbnail_url = omdb.Poster
