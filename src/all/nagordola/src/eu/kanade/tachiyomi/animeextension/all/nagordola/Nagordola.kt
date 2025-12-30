@@ -66,19 +66,6 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
         .add("Referer", "$baseUrl/")
         .add("Accept", "application/json, text/plain, */*")
 
-    private suspend fun enrichAnimes(animes: List<SAnime>) {
-        val apiKey = preferences.getString(PREF_OMDB_API_KEY, "") ?: ""
-        if (apiKey.isBlank()) return
-
-        coroutineScope {
-            animes.map { anime ->
-                async {
-                    fetchPoster(anime, apiKey)
-                }
-            }.awaitAll()
-        }
-    }
-
     private suspend fun fetchPoster(anime: SAnime, apiKey: String) {
         val cacheKey = "poster_${anime.title.hashCode()}"
         val cachedPoster = preferences.getString(cacheKey, null)
@@ -106,11 +93,6 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
 
     // ============================== Popular ===============================
 
-    override suspend fun getPopularAnime(page: Int): AnimesPage {
-        val response = client.newCall(popularAnimeRequest(page)).awaitSuccess()
-        return popularAnimeParse(response).also { enrichAnimes(it.animes) }
-    }
-
     override fun popularAnimeRequest(page: Int): Request {
         return searchAnimeRequest(page, "", getFilterList())
     }
@@ -118,11 +100,6 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
     override fun popularAnimeParse(response: Response): AnimesPage = searchAnimeParse(response)
 
     // =============================== Latest ===============================
-
-    override suspend fun getLatestUpdates(page: Int): AnimesPage {
-        val response = client.newCall(latestUpdatesRequest(page)).awaitSuccess()
-        return latestUpdatesParse(response).also { enrichAnimes(it.animes) }
-    }
 
     override fun latestUpdatesRequest(page: Int): Request {
         val payload = buildJsonObject {
@@ -150,9 +127,9 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
                 put("per_page", 30)
             }
             val request = POST("$baseUrl/api/fs/search", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
-            return client.newCall(request).awaitSuccess().use(::searchAnimeParse).also { enrichAnimes(it.animes) }
+            return client.newCall(request).awaitSuccess().use(::searchAnimeParse)
         }
-        return super.getSearchAnime(page, query, filters).also { enrichAnimes(it.animes) }
+        return super.getSearchAnime(page, query, filters)
     }
 
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
