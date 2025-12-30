@@ -73,7 +73,7 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
             key = PREF_TMDB_API_KEY
             title = "TMDb API Key"
             summary = "Used for TMDb posters. Get one at themoviedb.org"
-            setDefaultValue("5cd49aeaf94161b1e7badb23820f6ea9")
+            setDefaultValue("")
         }.also(screen::addPreference)
 
         EditTextPreference(screen.context).apply {
@@ -87,6 +87,28 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
     override fun headersBuilder() = super.headersBuilder()
         .add("Referer", "$baseUrl/")
         .add("Accept", "application/json, text/plain, */*")
+
+    private val enrichmentSemaphore = kotlinx.coroutines.sync.Semaphore(10)
+
+    private suspend fun enrichAnimes(animes: List<SAnime>) {
+        val source = preferences.getString(PREF_POSTER_SOURCE, "tmdb")
+        if (source != "tmdb") return
+
+        val apiKey = preferences.getString(PREF_TMDB_API_KEY, "") ?: ""
+        if (apiKey.isBlank()) return
+
+        kotlinx.coroutines.withTimeoutOrNull(3000) {
+            coroutineScope {
+                animes.map { anime ->
+                    async {
+                        enrichmentSemaphore.withPermit {
+                            fetchPosterFromTMDb(anime, apiKey)
+                        }
+                    }
+                }.awaitAll()
+            }
+        }
+    }
 
     private suspend fun fetchPoster(anime: SAnime, apiKey: String) {
         val cacheKey = "poster_omdb_${anime.title.hashCode()}"
@@ -142,13 +164,23 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
 
     // ============================== Popular ===============================
 
+    override suspend fun getPopularAnime(page: Int): AnimesPage {
+        val response = client.newCall(popularAnimeRequest(page)).awaitSuccess()
+        return popularAnimeParse(response).also { enrichAnimes(it.animes) }
+    }
+
     override fun popularAnimeRequest(page: Int): Request {
         return searchAnimeRequest(page, "", getFilterList())
     }
 
     override fun popularAnimeParse(response: Response): AnimesPage = searchAnimeParse(response)
 
-    // =============================== Latest = :==============================
+    // =============================== Latest ===============================
+
+    override suspend fun getLatestUpdates(page: Int): AnimesPage {
+        val response = client.newCall(latestUpdatesRequest(page)).awaitSuccess()
+        return latestUpdatesParse(response).also { enrichAnimes(it.animes) }
+    }
 
     override fun latestUpdatesRequest(page: Int): Request {
         val payload = buildJsonObject {
@@ -176,9 +208,9 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
                 put("per_page", 30)
             }
             val request = POST("$baseUrl/api/fs/search", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
-            return client.newCall(request).awaitSuccess().use(::searchAnimeParse)
+            return client.newCall(request).awaitSuccess().use(::searchAnimeParse).also { enrichAnimes(it.animes) }
         }
-        return super.getSearchAnime(page, query, filters)
+        return super.getSearchAnime(page, query, filters).also { enrichAnimes(it.animes) }
     }
 
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
