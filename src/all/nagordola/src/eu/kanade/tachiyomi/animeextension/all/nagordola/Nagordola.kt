@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.animeextension.all.nagordola
 
+import android.util.Log
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
@@ -165,7 +166,7 @@ class Nagordola : AnimeHttpSource() {
                 }
             }
         } catch (e: Exception) {
-            // Search failed or disabled, fallback to manual recursion
+            Log.e("Nagordola", "Search failed: ${e.message}")
         }
 
         if (episodes.isEmpty()) {
