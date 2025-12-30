@@ -141,7 +141,7 @@ class Nagordola : AnimeHttpSource() {
             val payload = buildJsonObject {
                 put("parent", anime.url)
                 put("keywords", " ") // Broad keyword
-                put("scope", 2)      // Files only
+                put("scope", 2) // Files only
                 put("per_page", 100)
             }
             val request = POST("$baseUrl/api/fs/search", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
