@@ -85,12 +85,8 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
 
     override suspend fun getSearchAnime(page: Int, query: String, filters: AnimeFilterList): AnimesPage {
         if (query.isNotEmpty()) {
-            val filterPath = filters.filterIsInstance<CategoryFilter>().firstOrNull()?.let {
-                categories[it.state].path
-            } ?: "/"
-
             val payload = buildJsonObject {
-                put("parent", filterPath)
+                put("parent", "/")
                 put("keywords", query)
                 put("scope", 0)
                 put("page", page)
@@ -186,40 +182,7 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
 
     override suspend fun getEpisodeList(anime: SAnime): List<SEpisode> {
         val episodes = mutableListOf<SEpisode>()
-
-        // Try Search as a "Batch" / Recursive fetch first to reduce requests
-        try {
-            val payload = buildJsonObject {
-                put("parent", anime.url)
-                put("keywords", " ") // Broad keyword
-                put("scope", 2) // Files only
-                put("per_page", 100)
-            }
-            val request = POST("$baseUrl/api/fs/search", headers, payload.toString().toRequestBody(JSON_MEDIA_TYPE))
-            val response = client.newCall(request).awaitSuccess()
-            val res = json.decodeFromString<AListResponse<AListSearchResponse>>(response.body?.string().orEmpty())
-
-            if (res.code == 200 && res.data?.content?.isNotEmpty() == true) {
-                res.data.content.forEach { file ->
-                    if (isVideoFile(file.name)) {
-                        episodes.add(
-                            SEpisode.create().apply {
-                                name = file.name
-                                url = "${file.parent}/${file.name}".replace("//", "/")
-                                episode_number = parseEpisodeNumber(file.name)
-                            },
-                        )
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            // Search failed or disabled, fallback to manual recursion
-        }
-
-        if (episodes.isEmpty()) {
-            parseDirectory(anime.url, episodes, 0)
-        }
-
+        parseDirectory(anime.url, episodes, 0)
         return episodes.distinctBy { it.url }.sortedBy { it.name }.reversed()
     }
 
