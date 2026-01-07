@@ -43,6 +43,8 @@ class Nagordola : ConfigurableAnimeSource, AnimeHttpSource() {
 
     override val supportsLatest = true
 
+    override val id: Long = 5181466391484419845L
+
     override val client: okhttp3.OkHttpClient = super.client.newBuilder()
         .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
