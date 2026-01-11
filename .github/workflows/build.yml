@@ -107,8 +107,12 @@ jobs:
           cp ${{ env.SIGNED_APK }} $REPO_DIR/apk/$TARGET_NAME
           
           cd $REPO_DIR
+          
+          # Generate new index
+          python3 generate_repo.py
+
           git config user.name "Gemini Automation"
           git config user.email "gemini@automation.bot"
-          git add apk/$TARGET_NAME
+          git add apk/$TARGET_NAME index.min.json repo.json
           git commit -m "Update Nagordola to v${{ env.NEW_VERSION }}"
           git push
